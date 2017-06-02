@@ -50,19 +50,25 @@ modelDir = os.path.join(fileDir, '..', 'models')
 dlibModelDir = os.path.join(modelDir, 'dlib')
 openfaceModelDir = os.path.join(modelDir, 'openface')
 
+model_loaded = False
+le = None
+clf = None
 
-def getRep(imgPath, multiple=False):
+
+def getRep(cv2image, multiple=False):
+    align = openface.AlignDlib(os.path.join(
+        dlibModelDir,
+        "shape_predictor_68_face_landmarks.dat"))
+    net = openface.TorchNeuralNet(os.path.join(
+        openfaceModelDir,
+        'nn4.small2.v1.t7'), 96, False)
     start = time.time()
-    bgrImg = cv2.imread(imgPath)
+    # bgrImg = cv2.imread(imgPath)
+    bgrImg = cv2image
     if bgrImg is None:
         raise Exception("Unable to load image: {}".format(imgPath))
 
     rgbImg = cv2.cvtColor(bgrImg, cv2.COLOR_BGR2RGB)
-
-    if args.verbose:
-        print("  + Original size: {}".format(rgbImg.shape))
-    if args.verbose:
-        print("Loading the image took {} seconds.".format(time.time() - start))
 
     start = time.time()
 
@@ -73,28 +79,20 @@ def getRep(imgPath, multiple=False):
         bbs = [bb1]
     if len(bbs) == 0 or (not multiple and bb1 is None):
         raise Exception("Unable to find a face: {}".format(imgPath))
-    if args.verbose:
-        print("Face detection took {} seconds.".format(time.time() - start))
 
     reps = []
     for bb in bbs:
         start = time.time()
         alignedFace = align.align(
-            args.imgDim,
+            96,
             rgbImg,
             bb,
             landmarkIndices=openface.AlignDlib.OUTER_EYES_AND_NOSE)
         if alignedFace is None:
             raise Exception("Unable to align image: {}".format(imgPath))
-        if args.verbose:
-            print("Alignment took {} seconds.".format(time.time() - start))
-            print("This bbox is centered at {}, {}".format(bb.center().x, bb.center().y))
 
         start = time.time()
         rep = net.forward(alignedFace)
-        if args.verbose:
-            print("Neural network forward pass took {} seconds.".format(
-                time.time() - start))
         reps.append((bb.center().x, rep))
     sreps = sorted(reps, key=lambda x: x[0])
     return sreps
@@ -171,37 +169,48 @@ def train(args):
         pickle.dump((le, clf), f)
 
 
-def infer(args, multiple=False):
-    with open(args.classifierModel, 'rb') as f:
-        if sys.version_info[0] < 3:
+def infer(classifierModel, cv2image, multiple=False):
+    global le
+    global clf
+    global model_loaded
+    if model_loaded == False:
+        model_loaded = True
+        with open(classifierModel, 'rb') as f:
+            print('model read!')
+            if sys.version_info[0] < 3:
                 (le, clf) = pickle.load(f)
-        else:
+            else:
                 (le, clf) = pickle.load(f, encoding='latin1')
 
-    for img in args.imgs:
-        print("\n=== {} ===".format(img))
-        reps = getRep(img, multiple)
-        if len(reps) > 1:
-            print("List of faces in image from left to right")
-        for r in reps:
-            rep = r[1].reshape(1, -1)
-            bbx = r[0]
-            start = time.time()
-            predictions = clf.predict_proba(rep).ravel()
-            maxI = np.argmax(predictions)
-            person = le.inverse_transform(maxI)
-            confidence = predictions[maxI]
-            if args.verbose:
-                print("Prediction took {} seconds.".format(time.time() - start))
-            if multiple:
-                print("Predict {} @ x={} with {:.2f} confidence.".format(person.decode('utf-8'), bbx,
-                                                                         confidence))
-            else:
-                print("Predict {} with {:.2f} confidence.".format(person.decode('utf-8'), confidence))
-            if isinstance(clf, GMM):
-                dist = np.linalg.norm(rep - clf.means_[maxI])
-                print("  + Distance from the mean: {}".format(dist))
+    confidence_rtn = list()
+    # print("\n=== {} ===".format(img_path))
+    try:
+        reps = getRep(cv2image, multiple)
+    except: # not able to find face
+        return confidence_rtn
 
+    # if len(reps) > 1:
+    #     print("List of faces in image from left to right")
+    for r in reps:
+        rep = r[1].reshape(1, -1)
+        bbx = r[0]
+        start = time.time()
+        predictions = clf.predict_proba(rep).ravel()
+        maxI = np.argmax(predictions)
+        person = le.inverse_transform(maxI)
+        confidence = predictions[maxI]
+        confidence_rtn.append(confidence) # for return
+        '''if multiple:
+            print("Predict {} @ x={} with {:.2f} confidence.".format(person.decode('utf-8'), bbx,
+                                                                     confidence))
+
+        else:
+            print("Predict {} with {:.2f} confidence.".format(person.decode('utf-8'), confidence))
+        '''
+        if isinstance(clf, GMM):
+            dist = np.linalg.norm(rep - clf.means_[maxI])
+            # print("  + Distance from the mean: {}".format(dist))
+    return confidence_rtn
 
 if __name__ == '__main__':
 
@@ -290,4 +299,5 @@ Use `--networkModel` to set a non-standard Torch network model.""")
     if args.mode == 'train':
         train(args)
     elif args.mode == 'infer':
-        infer(args, args.multi)
+        print('Doing nothing!')
+    #    infer(args, args.multi)
