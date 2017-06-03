@@ -54,14 +54,14 @@ model_loaded = False
 le = None
 clf = None
 
+align = openface.AlignDlib(os.path.join(
+    dlibModelDir,
+    "shape_predictor_68_face_landmarks.dat"))
+net = openface.TorchNeuralNet(os.path.join(
+    openfaceModelDir,
+    'nn4.small2.v1.t7'), 96, False)
 
 def getRep(cv2image, multiple=False):
-    align = openface.AlignDlib(os.path.join(
-        dlibModelDir,
-        "shape_predictor_68_face_landmarks.dat"))
-    net = openface.TorchNeuralNet(os.path.join(
-        openfaceModelDir,
-        'nn4.small2.v1.t7'), 96, False)
     start = time.time()
     # bgrImg = cv2.imread(imgPath)
     bgrImg = cv2image
